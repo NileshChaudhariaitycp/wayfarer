@@ -3,3 +3,11 @@
 # to this folder as each service is built.
 wayfarer:
   config-source: config-server
+  jwt:
+    # Demo-only: one shared symmetric (HMAC) secret, distributed via config-server,
+    # used by auth-service to sign tokens and api-gateway to verify them.
+    # Production-grade alternative: asymmetric signing (RS256/ES256) with auth-service
+    # holding the private key and exposing a JWKS endpoint of public keys — any service
+    # can then verify a token without ever holding key material that could mint one.
+    secret: fmldFlds+ZqpTmrFtbhmgY1McMGThrY8f52H5XSL4DA=
+    expiration-ms: 3600000

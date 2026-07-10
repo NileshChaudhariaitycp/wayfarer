@@ -11,7 +11,9 @@ and [`LEARNING-LOG.md`](LEARNING-LOG.md) for per-phase comprehension checkpoints
 
 ## Status
 
-🚧 Under active build — see the roadmap below for current phase.
+🚧 Under active build. Phase 0–2 complete: backbone (Eureka, Config Server,
+Gateway) plus identity (auth-service, user-service, JWT + RBAC, gateway
+header forwarding) all built and verified end-to-end.
 
 ## Services
 
@@ -41,6 +43,33 @@ and [`LEARNING-LOG.md`](LEARNING-LOG.md) for per-phase comprehension checkpoints
 7. Deployment — Kubernetes + Helm on minikube/kind
 8. CI/CD — GitHub Actions
 9. Capstone — independent feature ticket, reviewed like a real PR
+
+## Role matrix (implemented so far)
+
+| Endpoint | Public | CUSTOMER | TRAVEL_AGENT | ADMIN |
+|---|---|---|---|---|
+| `POST /auth/register` | ✅ | ✅ | ✅ | ✅ |
+| `POST /auth/login` | ✅ | ✅ | ✅ | ✅ |
+| `GET /users/me` | ❌ | ✅ (own profile) | ✅ (own profile) | ✅ (own profile) |
+| `GET /users/{id}` | ❌ | ❌ | ❌ | ✅ (any profile) |
+
+**Current limitation, called out explicitly:** the "only ADMIN can view
+other profiles" rule is enforced by `user-service`, which trusts
+`X-User-Id`/`X-User-Roles` headers set by `api-gateway` after JWT
+validation (see [ADR 0004](docs/adr/0004-trust-the-gateway.md)). Running
+everything locally via `mvn spring-boot:run`, every service's port is open
+on `localhost` — nothing stops you from calling `user-service` on 8082
+directly and forging those headers to impersonate anyone. That trust
+boundary only becomes real in Phase 6, once docker-compose stops publishing
+anything but the gateway's port to the host.
+
+## Demo credentials (seeded by each service's DataSeeder)
+
+| Username | Password | Role |
+|---|---|---|
+| `customer1` | `Password123!` | CUSTOMER |
+| `agent1` | `Password123!` | TRAVEL_AGENT |
+| `admin1` | `Password123!` | ADMIN |
 
 ## Tech stack
 
