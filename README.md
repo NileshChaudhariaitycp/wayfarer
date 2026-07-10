@@ -11,10 +11,13 @@ and [`LEARNING-LOG.md`](LEARNING-LOG.md) for per-phase comprehension checkpoints
 
 ## Status
 
-🚧 Under active build. Phase 0–3 complete: backbone (Eureka, Config Server,
+🚧 Under active build. Phase 0–4 complete: backbone (Eureka, Config Server,
 Gateway), identity (auth-service, user-service, JWT + RBAC, gateway header
-forwarding), and inventory (flight-service, hotel-service, public search +
-admin CRUD) all built and verified end-to-end.
+forwarding), inventory (flight-service, hotel-service, public search + admin
+CRUD), and orchestration (booking-service Saga with pessimistic-locked
+inventory, payment-service, loyalty-service) all built and verified
+end-to-end — including the compensation paths (payment decline releases
+seats, cancellation reverses everything).
 
 ## Services
 
@@ -38,7 +41,7 @@ admin CRUD) all built and verified end-to-end.
 1. Foundation — discovery/config/gateway *(complete)*
 2. Identity — auth-service, user-service, full JWT + RBAC, gateway header forwarding *(complete)*
 3. Inventory — flight-service, hotel-service, public search + admin CRUD *(complete)*
-4. Orchestration — booking-service (Saga), payment-service, loyalty-service
+4. Orchestration — booking-service (Saga), payment-service, loyalty-service *(complete)*
 5. Event-driven — Kafka, notification-service
 6. Resilience & observability — Resilience4j, tracing, metrics, logs
 7. Containerization + real DB — Docker Compose, H2 → Postgres, add Redis
@@ -58,6 +61,11 @@ admin CRUD) all built and verified end-to-end.
 | `POST/PUT/DELETE /flights/**` | ❌ | ❌ | ❌ | ✅ |
 | `GET /hotels/search`, `GET /hotels/{id}` | ✅ | ✅ | ✅ | ✅ |
 | `POST/PUT/DELETE /hotels/**` | ❌ | ❌ | ❌ | ✅ |
+| `POST /bookings/flights`, `POST /bookings/hotels` | ❌ | ✅ (self only) | ✅ (self or on behalf, via `customerId`) | ✅ |
+| `POST /bookings/{id}/cancel` | ❌ | ✅ (own booking) | ✅ (booking they created) | ✅ (any) |
+| `GET /bookings/{id}`, `GET /bookings/me` | ❌ | ✅ (own only) | ✅ (own or created-by-them) | ✅ (any) |
+| `GET /bookings` (list all) | ❌ | ❌ | ❌ | ✅ |
+| `GET /loyalty/me` | ❌ | ✅ (own balance) | ✅ (own balance) | ✅ (own balance) |
 
 **Current limitation, called out explicitly:** the "only ADMIN can write"
 rules are enforced by each service trusting `X-User-Id`/`X-User-Roles`

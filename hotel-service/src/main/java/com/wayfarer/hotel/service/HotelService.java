@@ -7,6 +7,7 @@ import com.wayfarer.hotel.dto.RoomTypeResponse;
 import com.wayfarer.hotel.entity.Hotel;
 import com.wayfarer.hotel.entity.RoomType;
 import com.wayfarer.hotel.exception.HotelNotFoundException;
+import com.wayfarer.hotel.exception.InsufficientRoomsException;
 import com.wayfarer.hotel.exception.RoomTypeNotFoundException;
 import com.wayfarer.hotel.repository.HotelRepository;
 import com.wayfarer.hotel.repository.RoomTypeRepository;
@@ -96,6 +97,31 @@ public class HotelService {
                 .filter(rt -> rt.getHotel().getId().equals(hotelId))
                 .orElseThrow(() -> new RoomTypeNotFoundException(hotelId, roomTypeId));
         roomTypeRepository.delete(roomType);
+    }
+
+    // Same pessimistic-locked reserve/release pattern as flight-service's
+    // seat inventory — see ADR 0005. Not idempotent against a duplicate
+    // release call, for the same reason: booking-service is the only
+    // caller and guarantees at-most-once compensation per reservation.
+    @Transactional
+    public void reserveRooms(Long roomTypeId, int rooms) {
+        RoomType roomType = roomTypeRepository.findByIdForUpdate(roomTypeId)
+                .orElseThrow(() -> new RoomTypeNotFoundException(null, roomTypeId));
+        if (roomType.getRoomsAvailable() < rooms) {
+            throw new InsufficientRoomsException(roomTypeId, rooms, roomType.getRoomsAvailable());
+        }
+        roomType.setRoomsAvailable(roomType.getRoomsAvailable() - rooms);
+        roomTypeRepository.save(roomType);
+        log.info("Reserved {} room(s) of type {} ({} remaining)", rooms, roomTypeId, roomType.getRoomsAvailable());
+    }
+
+    @Transactional
+    public void releaseRooms(Long roomTypeId, int rooms) {
+        RoomType roomType = roomTypeRepository.findByIdForUpdate(roomTypeId)
+                .orElseThrow(() -> new RoomTypeNotFoundException(null, roomTypeId));
+        roomType.setRoomsAvailable(Math.min(roomType.getTotalRooms(), roomType.getRoomsAvailable() + rooms));
+        roomTypeRepository.save(roomType);
+        log.info("Released {} room(s) of type {} ({} now available)", rooms, roomTypeId, roomType.getRoomsAvailable());
     }
 
     private void applyRequest(Hotel hotel, HotelRequest request) {

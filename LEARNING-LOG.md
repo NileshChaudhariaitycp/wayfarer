@@ -21,3 +21,9 @@ Per-phase comprehension checkpoints. Each phase adds a section once it's complet
 - Why does the gateway need a *method-aware* public-path check for `/flights/**` and `/hotels/**`, when `/auth/register` and `/auth/login` were fine with a plain path match?
 - `RoomType.hotel` is `@ManyToOne(fetch = FetchType.LAZY)` but `Hotel.roomTypes` is `fetch = FetchType.EAGER`. What's the practical difference, and why might always-eager loading of a collection become a problem as hotel-service's data grows?
 - `flight-service`'s `update()` recomputes `seatsAvailable` from `totalSeats - seatsBooked` instead of just overwriting it with the request's value. Why does that matter once real bookings exist?
+
+## Phase 4 — Orchestration (booking-service Saga, payment-service, loyalty-service, pessimistic locking)
+- `BookingOrchestrationService` is deliberately NOT wrapped in one `@Transactional` spanning the whole Saga. Walk through what would go wrong if it were, specifically around the moment right after seats are reserved but before payment is attempted.
+- During testing, a real "bug" turned out to be a test-data collision: an earlier manual call to loyalty-service's `/earn` endpoint used `bookingId=1`, and booking-service's first real booking also got `id=1`, so the idempotency check silently skipped crediting points. What does this tell you about `bookingId` as a dedup key across two independently-seeded systems, and would this scenario ever actually happen in production?
+- `flight-service`'s `releaseSeats` is explicitly *not* idempotent (documented in a comment), while `loyalty-service`'s `earn`/`reverse` are. Why was that an acceptable trade-off here, and what would have to be true for it to stop being acceptable?
+- Trace what happens if `payment-service` itself crashes (not declines — actually goes unreachable) mid-authorize, after `booking-service` already reserved seats. What state is the system left in, and who or what would need to notice and fix it?

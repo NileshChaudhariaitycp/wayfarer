@@ -33,6 +33,14 @@ spring:
               uri: lb://HOTEL-SERVICE
               predicates:
                 - Path=/hotels/**
+            - id: booking-service-route
+              uri: lb://BOOKING-SERVICE
+              predicates:
+                - Path=/bookings/**
+            - id: loyalty-service-route
+              uri: lb://LOYALTY-SERVICE
+              predicates:
+                - Path=/loyalty/**
 
 wayfarer:
   security:

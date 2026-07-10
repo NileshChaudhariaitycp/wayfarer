@@ -4,6 +4,7 @@ import com.wayfarer.flight.dto.FlightRequest;
 import com.wayfarer.flight.dto.FlightResponse;
 import com.wayfarer.flight.entity.Flight;
 import com.wayfarer.flight.exception.FlightNotFoundException;
+import com.wayfarer.flight.exception.InsufficientSeatsException;
 import com.wayfarer.flight.repository.FlightRepository;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -72,6 +73,34 @@ public class FlightService {
         }
         flightRepository.deleteById(id);
         log.info("Deleted flight id={}", id);
+    }
+
+    // Unlike loyalty-service's earn/reverse, this isn't idempotent against a
+    // duplicate call — calling release twice adds seats back twice. That's
+    // acceptable only because booking-service (the only caller) tracks each
+    // booking's status and guarantees it calls release at most once per
+    // reservation. If a second caller of this internal API appeared, it
+    // would need the same bookingId-keyed idempotency check loyalty-service
+    // uses.
+    @Transactional
+    public void reserveSeats(Long flightId, int seats) {
+        Flight flight = flightRepository.findByIdForUpdate(flightId)
+                .orElseThrow(() -> new FlightNotFoundException(flightId));
+        if (flight.getSeatsAvailable() < seats) {
+            throw new InsufficientSeatsException(flightId, seats, flight.getSeatsAvailable());
+        }
+        flight.setSeatsAvailable(flight.getSeatsAvailable() - seats);
+        flightRepository.save(flight);
+        log.info("Reserved {} seat(s) on flight {} ({} remaining)", seats, flightId, flight.getSeatsAvailable());
+    }
+
+    @Transactional
+    public void releaseSeats(Long flightId, int seats) {
+        Flight flight = flightRepository.findByIdForUpdate(flightId)
+                .orElseThrow(() -> new FlightNotFoundException(flightId));
+        flight.setSeatsAvailable(Math.min(flight.getTotalSeats(), flight.getSeatsAvailable() + seats));
+        flightRepository.save(flight);
+        log.info("Released {} seat(s) on flight {} ({} now available)", seats, flightId, flight.getSeatsAvailable());
     }
 
     private void applyRequest(Flight flight, FlightRequest request) {
