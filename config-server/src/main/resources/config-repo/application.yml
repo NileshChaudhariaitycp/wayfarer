@@ -1,0 +1,5 @@
+# Shared config served to every client whose spring.application.name doesn't
+# have a more specific <name>.yml here. Real per-service settings get added
+# to this folder as each service is built.
+wayfarer:
+  config-source: config-server
