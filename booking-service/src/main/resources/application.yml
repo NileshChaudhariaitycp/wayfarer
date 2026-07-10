@@ -33,6 +33,18 @@ spring:
         # delay, not a full minute — see BookingEventPublisher's javadoc.
         "[max.block.ms]": 3000
 
+# Bounds how long a single HTTP call to another service can take before
+# Feign gives up — this is the "timeout" leg of resilience (circuit breaker
+# and retry are configured below under resilience4j.*). Kept short since
+# these are all same-machine calls in dev; a real deployment would tune this
+# per downstream service based on its actual latency profile.
+feign:
+  client:
+    config:
+      default:
+        connectTimeout: 2000
+        readTimeout: 3000
+
 eureka:
   client:
     service-url:
@@ -44,4 +56,45 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,prometheus,circuitbreakers,retries
+  health:
+    circuitbreakers:
+      enabled: true
+
+# See ADR 0007: circuit breaker on every downstream client, automatic retry
+# ONLY on the operations documented as idempotent in the Resilient*Client
+# wrappers (getFlight, getHotel, refund, loyalty earn/reverse) — never on
+# reserve/release/authorize.
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        register-health-indicator: true
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 3
+    instances:
+      flightService:
+        base-config: default
+      hotelService:
+        base-config: default
+      paymentService:
+        base-config: default
+      loyaltyService:
+        base-config: default
+  retry:
+    configs:
+      default:
+        max-attempts: 3
+        wait-duration: 200ms
+    instances:
+      flightService:
+        base-config: default
+      hotelService:
+        base-config: default
+      paymentService:
+        base-config: default
+      loyaltyService:
+        base-config: default

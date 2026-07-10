@@ -11,3 +11,18 @@ wayfarer:
     # can then verify a token without ever holding key material that could mint one.
     secret: fmldFlds+ZqpTmrFtbhmgY1McMGThrY8f52H5XSL4DA=
     expiration-ms: 3600000
+
+# Shared observability config — every client gets the same trace sampling
+# rate and log format without duplicating it in 9 separate application.yml
+# files. Sampling 100% of requests is a dev/demo choice only; a real
+# production deployment samples a small percentage to bound tracing
+# overhead and storage cost.
+management:
+  tracing:
+    sampling:
+      probability: 1.0
+
+logging:
+  pattern:
+    level: "%5p [${spring.application.name},%X{traceId:-},%X{spanId:-}]"
+

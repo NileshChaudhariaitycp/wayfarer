@@ -26,7 +26,7 @@ public class SecurityConfig {
                         // Service-to-service only — never routed through the gateway to
                         // external clients (see api-gateway's route config).
                         .requestMatchers("/internal/**").permitAll()
-                        .requestMatchers("/actuator/health").permitAll()
+                        .requestMatchers("/actuator/health", "/actuator/prometheus").permitAll()
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                         .requestMatchers("/h2-console/**").permitAll()
                         .anyRequest().authenticated())

@@ -23,7 +23,9 @@ public class SecurityConfig {
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/actuator/health").permitAll()
+                        // Dev-only diagnostic exposure, same caveat as h2-console below —
+                        // not something you'd leave unauthenticated in production.
+                        .requestMatchers("/actuator/health", "/actuator/prometheus", "/actuator/circuitbreakers", "/actuator/retries").permitAll()
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                         .requestMatchers("/h2-console/**").permitAll()
                         .anyRequest().authenticated())

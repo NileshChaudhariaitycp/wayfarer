@@ -13,3 +13,17 @@ eureka:
     fetch-registry: false
     service-url:
       defaultZone: http://${eureka.instance.hostname}:${server.port}/eureka/
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+
+# No micrometer-tracing-bridge-brave here — discovery-server doesn't
+# participate in propagated trace chains (nothing calls through it as part
+# of a request). Same log format as every other service anyway, for
+# consistency when tailing multiple services' logs side by side.
+logging:
+  pattern:
+    level: "%5p [${spring.application.name},%X{traceId:-},%X{spanId:-}]"

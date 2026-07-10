@@ -2,8 +2,11 @@ package com.wayfarer.booking.service;
 
 import com.wayfarer.booking.client.FlightServiceClient;
 import com.wayfarer.booking.client.HotelServiceClient;
-import com.wayfarer.booking.client.LoyaltyServiceClient;
 import com.wayfarer.booking.client.PaymentServiceClient;
+import com.wayfarer.booking.client.resilient.ResilientFlightClient;
+import com.wayfarer.booking.client.resilient.ResilientHotelClient;
+import com.wayfarer.booking.client.resilient.ResilientLoyaltyClient;
+import com.wayfarer.booking.client.resilient.ResilientPaymentClient;
 import com.wayfarer.booking.dto.BookFlightRequest;
 import com.wayfarer.booking.dto.BookHotelRequest;
 import com.wayfarer.booking.dto.BookingResponse;
@@ -14,8 +17,8 @@ import com.wayfarer.booking.event.BookingEvent;
 import com.wayfarer.booking.event.BookingEventPublisher;
 import com.wayfarer.booking.exception.BookingFailedException;
 import com.wayfarer.booking.exception.BookingNotFoundException;
+import com.wayfarer.booking.exception.DownstreamCallException;
 import com.wayfarer.booking.repository.BookingRepository;
-import feign.FeignException;
 import java.math.BigDecimal;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
@@ -26,15 +29,28 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 
 /**
- * The Saga orchestrator — see ADR 0005 for the full reasoning. Deliberately
- * NOT wrapped in a single @Transactional: each Booking row mutation
- * (PENDING -> CONFIRMED/FAILED) commits immediately and independently. If
- * this process crashed mid-flight, wrapping everything in one local
- * transaction would roll back even the PENDING row on restart, silently
- * losing the fact that a seat was already reserved (or a card already
- * charged) in a completely different service's database. A durably-visible
- * PENDING row is what lets an operator (or a future reconciliation job)
- * notice and fix a stuck booking.
+ * The Saga orchestrator — see ADR 0005 for the full reasoning, and ADR 0007
+ * for the resilience patterns below. Deliberately NOT wrapped in a single
+ * @Transactional: each Booking row mutation (PENDING -> CONFIRMED/FAILED)
+ * commits immediately and independently. If this process crashed
+ * mid-flight, wrapping everything in one local transaction would roll back
+ * even the PENDING row on restart, silently losing the fact that a seat was
+ * already reserved (or a card already charged) in a completely different
+ * service's database. A durably-visible PENDING row is what lets an
+ * operator (or a future reconciliation job) notice and fix a stuck booking.
+ *
+ * All downstream calls go through Resilient*Client wrappers (circuit
+ * breaker everywhere, automatic retry ONLY on the genuinely idempotent
+ * operations) and surface failures as one consistent DownstreamCallException
+ * instead of a library-specific exception type — see ADR 0007.
+ *
+ * Known gap, not fixed here: if a compensating call itself fails (e.g.
+ * releaseSeats during payment-failure handling, after the circuit breaker
+ * has already given up), that exception propagates uncaught out of this
+ * service as a 500 rather than being retried or queued for later. A real
+ * production system would route a failed compensation to a dead-letter
+ * queue / manual-intervention alert rather than let it surface as a plain
+ * request failure — deliberately out of scope for this project.
  */
 @Service
 @RequiredArgsConstructor
@@ -43,16 +59,23 @@ public class BookingOrchestrationService {
     private static final Logger log = LoggerFactory.getLogger(BookingOrchestrationService.class);
 
     private final BookingRepository bookingRepository;
-    private final FlightServiceClient flightServiceClient;
-    private final HotelServiceClient hotelServiceClient;
-    private final PaymentServiceClient paymentServiceClient;
-    private final LoyaltyServiceClient loyaltyServiceClient;
+    private final ResilientFlightClient flightClient;
+    private final ResilientHotelClient hotelClient;
+    private final ResilientPaymentClient paymentClient;
+    private final ResilientLoyaltyClient loyaltyClient;
     private final BookingEventPublisher bookingEventPublisher;
 
     public BookingResponse bookFlight(BookFlightRequest request, Long callerId, boolean callerCanActOnBehalf) {
         Long customerId = resolveCustomerId(request.customerId(), callerId, callerCanActOnBehalf);
 
-        FlightServiceClient.FlightDetails flight = flightServiceClient.getFlight(request.flightId());
+        // No Booking row exists yet at this point, so a failure here has
+        // nothing to mark FAILED or compensate — just a clean rejection.
+        FlightServiceClient.FlightDetails flight;
+        try {
+            flight = flightClient.getFlight(request.flightId());
+        } catch (DownstreamCallException ex) {
+            throw new BookingFailedException("Could not look up flight " + request.flightId() + " (" + ex.getMessage() + ")");
+        }
         BigDecimal totalPrice = flight.basePrice().multiply(BigDecimal.valueOf(request.seats()));
 
         Booking booking = new Booking();
@@ -71,29 +94,28 @@ public class BookingOrchestrationService {
 
         // Step 1: reserve seats (pessimistic-locked in flight-service)
         try {
-            flightServiceClient.reserveSeats(request.flightId(), new FlightServiceClient.SeatsRequest(request.seats()));
-        } catch (FeignException ex) {
-            return fail(booking, "Seat reservation failed (" + downstreamMessage(ex) + ")");
+            flightClient.reserveSeats(request.flightId(), request.seats());
+        } catch (DownstreamCallException ex) {
+            return fail(booking, "Seat reservation failed (" + ex.getMessage() + ")");
         }
 
         // Step 2: authorize payment
         PaymentServiceClient.PaymentResult payment;
         try {
-            payment = paymentServiceClient.authorize(
-                    new PaymentServiceClient.AuthorizeRequest(bookingId, totalPrice, request.cardToken()));
-        } catch (FeignException ex) {
-            flightServiceClient.releaseSeats(request.flightId(), new FlightServiceClient.SeatsRequest(request.seats()));
-            return fail(booking, "Payment failed (" + downstreamMessage(ex) + ")");
+            payment = paymentClient.authorize(bookingId, totalPrice, request.cardToken());
+        } catch (DownstreamCallException ex) {
+            flightClient.releaseSeats(request.flightId(), request.seats());
+            return fail(booking, "Payment failed (" + ex.getMessage() + ")");
         }
         booking.setPaymentId(payment.id());
 
         // Step 3: award loyalty points
         try {
-            loyaltyServiceClient.earn(customerId, new LoyaltyServiceClient.EarnRequest(bookingId, pointsFor(totalPrice)));
-        } catch (FeignException ex) {
-            paymentServiceClient.refund(payment.id());
-            flightServiceClient.releaseSeats(request.flightId(), new FlightServiceClient.SeatsRequest(request.seats()));
-            return fail(booking, "Loyalty points failed (" + downstreamMessage(ex) + ")");
+            loyaltyClient.earn(customerId, bookingId, pointsFor(totalPrice));
+        } catch (DownstreamCallException ex) {
+            paymentClient.refund(payment.id());
+            flightClient.releaseSeats(request.flightId(), request.seats());
+            return fail(booking, "Loyalty points failed (" + ex.getMessage() + ")");
         }
 
         return confirm(booking);
@@ -102,7 +124,14 @@ public class BookingOrchestrationService {
     public BookingResponse bookHotel(BookHotelRequest request, Long callerId, boolean callerCanActOnBehalf) {
         Long customerId = resolveCustomerId(request.customerId(), callerId, callerCanActOnBehalf);
 
-        HotelServiceClient.HotelDetails hotel = hotelServiceClient.getHotel(request.hotelId());
+        // No Booking row exists yet at this point — same reasoning as
+        // bookFlight's initial getFlight() lookup.
+        HotelServiceClient.HotelDetails hotel;
+        try {
+            hotel = hotelClient.getHotel(request.hotelId());
+        } catch (DownstreamCallException ex) {
+            throw new BookingFailedException("Could not look up hotel " + request.hotelId() + " (" + ex.getMessage() + ")");
+        }
         HotelServiceClient.RoomTypeDetails roomType = hotel.roomTypes().stream()
                 .filter(rt -> rt.id().equals(request.roomTypeId()))
                 .findFirst()
@@ -136,29 +165,28 @@ public class BookingOrchestrationService {
 
         // Step 1: reserve rooms (pessimistic-locked in hotel-service)
         try {
-            hotelServiceClient.reserveRooms(request.roomTypeId(), new HotelServiceClient.RoomsRequest(request.rooms()));
-        } catch (FeignException ex) {
-            return fail(booking, "Room reservation failed (" + downstreamMessage(ex) + ")");
+            hotelClient.reserveRooms(request.roomTypeId(), request.rooms());
+        } catch (DownstreamCallException ex) {
+            return fail(booking, "Room reservation failed (" + ex.getMessage() + ")");
         }
 
         // Step 2: authorize payment
         PaymentServiceClient.PaymentResult payment;
         try {
-            payment = paymentServiceClient.authorize(
-                    new PaymentServiceClient.AuthorizeRequest(bookingId, totalPrice, request.cardToken()));
-        } catch (FeignException ex) {
-            hotelServiceClient.releaseRooms(request.roomTypeId(), new HotelServiceClient.RoomsRequest(request.rooms()));
-            return fail(booking, "Payment failed (" + downstreamMessage(ex) + ")");
+            payment = paymentClient.authorize(bookingId, totalPrice, request.cardToken());
+        } catch (DownstreamCallException ex) {
+            hotelClient.releaseRooms(request.roomTypeId(), request.rooms());
+            return fail(booking, "Payment failed (" + ex.getMessage() + ")");
         }
         booking.setPaymentId(payment.id());
 
         // Step 3: award loyalty points
         try {
-            loyaltyServiceClient.earn(customerId, new LoyaltyServiceClient.EarnRequest(bookingId, pointsFor(totalPrice)));
-        } catch (FeignException ex) {
-            paymentServiceClient.refund(payment.id());
-            hotelServiceClient.releaseRooms(request.roomTypeId(), new HotelServiceClient.RoomsRequest(request.rooms()));
-            return fail(booking, "Loyalty points failed (" + downstreamMessage(ex) + ")");
+            loyaltyClient.earn(customerId, bookingId, pointsFor(totalPrice));
+        } catch (DownstreamCallException ex) {
+            paymentClient.refund(payment.id());
+            hotelClient.releaseRooms(request.roomTypeId(), request.rooms());
+            return fail(booking, "Loyalty points failed (" + ex.getMessage() + ")");
         }
 
         return confirm(booking);
@@ -174,13 +202,13 @@ public class BookingOrchestrationService {
         }
 
         if (booking.getPaymentId() != null) {
-            paymentServiceClient.refund(booking.getPaymentId());
+            paymentClient.refund(booking.getPaymentId());
         }
-        loyaltyServiceClient.reverse(booking.getCustomerId(), bookingId);
+        loyaltyClient.reverse(booking.getCustomerId(), bookingId);
         if (booking.getBookingType() == BookingType.FLIGHT) {
-            flightServiceClient.releaseSeats(booking.getFlightId(), new FlightServiceClient.SeatsRequest(booking.getQuantity()));
+            flightClient.releaseSeats(booking.getFlightId(), booking.getQuantity());
         } else {
-            hotelServiceClient.releaseRooms(booking.getRoomTypeId(), new HotelServiceClient.RoomsRequest(booking.getQuantity()));
+            hotelClient.releaseRooms(booking.getRoomTypeId(), booking.getQuantity());
         }
 
         booking.setStatus(BookingStatus.CANCELLED);
@@ -244,9 +272,5 @@ public class BookingOrchestrationService {
 
     private int pointsFor(BigDecimal totalPrice) {
         return totalPrice.intValue(); // 1 point per dollar spent — simple, not yet configurable
-    }
-
-    private String downstreamMessage(FeignException ex) {
-        return "HTTP " + ex.status();
     }
 }

@@ -28,6 +28,17 @@ unreachable (a real bug in the "fire and forget" publish path was found and
 fixed along the way — see [ADR 0006](docs/adr/0006-event-driven-notifications.md)).
 Run the live test as soon as Docker/Kafka is available.
 
+Phase 6 (Resilience4j + tracing + Prometheus metrics) is complete and fully
+live-verified — circuit breakers confirmed to open under repeated failure,
+fail fast while open, and recover automatically; the same trace ID confirmed
+propagating across booking-service → flight-service → payment-service →
+loyalty-service for a single request (after fixing a real missing-dependency
+bug — see [ADR 0008](docs/adr/0008-observability-tracing-and-metrics.md));
+every service confirmed emitting valid Prometheus-format metrics. Actually
+running Zipkin/Prometheus/Grafana servers themselves stays deferred to
+Phase 7 alongside Docker Compose, for the same Docker-availability reason as
+Phase 5.
+
 ## Services
 
 | # | Service | Port | Responsibility |
@@ -52,7 +63,7 @@ Run the live test as soon as Docker/Kafka is available.
 3. Inventory — flight-service, hotel-service, public search + admin CRUD *(complete)*
 4. Orchestration — booking-service (Saga), payment-service, loyalty-service *(complete)*
 5. Event-driven — Kafka, notification-service *(code complete, live end-to-end test pending Docker)*
-6. Resilience & observability — Resilience4j, tracing, metrics, logs
+6. Resilience & observability — Resilience4j, tracing, metrics, logs *(complete — Zipkin/Prometheus/Grafana servers themselves pending Docker, alongside Phase 5's Kafka)*
 7. Containerization + real DB — Docker Compose, H2 → Postgres, add Redis
 8. Deployment — Kubernetes + Helm on minikube/kind
 9. CI/CD — GitHub Actions
