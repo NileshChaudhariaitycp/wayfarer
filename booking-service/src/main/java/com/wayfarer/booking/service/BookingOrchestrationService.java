@@ -10,6 +10,8 @@ import com.wayfarer.booking.dto.BookingResponse;
 import com.wayfarer.booking.entity.Booking;
 import com.wayfarer.booking.entity.BookingStatus;
 import com.wayfarer.booking.entity.BookingType;
+import com.wayfarer.booking.event.BookingEvent;
+import com.wayfarer.booking.event.BookingEventPublisher;
 import com.wayfarer.booking.exception.BookingFailedException;
 import com.wayfarer.booking.exception.BookingNotFoundException;
 import com.wayfarer.booking.repository.BookingRepository;
@@ -45,6 +47,7 @@ public class BookingOrchestrationService {
     private final HotelServiceClient hotelServiceClient;
     private final PaymentServiceClient paymentServiceClient;
     private final LoyaltyServiceClient loyaltyServiceClient;
+    private final BookingEventPublisher bookingEventPublisher;
 
     public BookingResponse bookFlight(BookFlightRequest request, Long callerId, boolean callerCanActOnBehalf) {
         Long customerId = resolveCustomerId(request.customerId(), callerId, callerCanActOnBehalf);
@@ -183,6 +186,8 @@ public class BookingOrchestrationService {
         booking.setStatus(BookingStatus.CANCELLED);
         booking = bookingRepository.save(booking);
         log.info("Booking {} CANCELLED", bookingId);
+        bookingEventPublisher.publish(BookingEvent.cancelled(
+                booking.getId(), booking.getCustomerId(), booking.getBookingType().name()));
         return BookingResponse.from(booking);
     }
 
@@ -210,14 +215,18 @@ public class BookingOrchestrationService {
         booking.setStatus(BookingStatus.CONFIRMED);
         booking = bookingRepository.save(booking);
         log.info("Booking {} CONFIRMED, total {}", booking.getId(), booking.getTotalPrice());
+        bookingEventPublisher.publish(BookingEvent.confirmed(
+                booking.getId(), booking.getCustomerId(), booking.getBookingType().name(), booking.getTotalPrice()));
         return BookingResponse.from(booking);
     }
 
     private BookingResponse fail(Booking booking, String reason) {
         booking.setStatus(BookingStatus.FAILED);
         booking.setFailureReason(reason);
-        bookingRepository.save(booking);
+        booking = bookingRepository.save(booking);
         log.warn("Booking {} FAILED: {}", booking.getId(), reason);
+        bookingEventPublisher.publish(BookingEvent.failed(
+                booking.getId(), booking.getCustomerId(), booking.getBookingType().name(), reason));
         throw new BookingFailedException(reason);
     }
 

@@ -11,13 +11,22 @@ and [`LEARNING-LOG.md`](LEARNING-LOG.md) for per-phase comprehension checkpoints
 
 ## Status
 
-🚧 Under active build. Phase 0–4 complete: backbone (Eureka, Config Server,
-Gateway), identity (auth-service, user-service, JWT + RBAC, gateway header
-forwarding), inventory (flight-service, hotel-service, public search + admin
-CRUD), and orchestration (booking-service Saga with pessimistic-locked
-inventory, payment-service, loyalty-service) all built and verified
-end-to-end — including the compensation paths (payment decline releases
-seats, cancellation reverses everything).
+🚧 Under active build. Phase 0–4 complete and fully verified end-to-end:
+backbone (Eureka, Config Server, Gateway), identity (auth-service,
+user-service, JWT + RBAC, gateway header forwarding), inventory
+(flight-service, hotel-service, public search + admin CRUD), and
+orchestration (booking-service Saga with pessimistic-locked inventory,
+payment-service, loyalty-service) — including the compensation paths
+(payment decline releases seats, cancellation reverses everything).
+
+Phase 5 (Kafka + notification-service) is built and both services boot
+cleanly, but **not yet live-verified end-to-end** — Docker Desktop failed to
+start on the dev machine ("Docker Desktop is unable to start"), so there's
+no Kafka broker to test the actual produce→consume flow against yet. What
+*is* confirmed: bookings still complete successfully even with Kafka
+unreachable (a real bug in the "fire and forget" publish path was found and
+fixed along the way — see [ADR 0006](docs/adr/0006-event-driven-notifications.md)).
+Run the live test as soon as Docker/Kafka is available.
 
 ## Services
 
@@ -42,7 +51,7 @@ seats, cancellation reverses everything).
 2. Identity — auth-service, user-service, full JWT + RBAC, gateway header forwarding *(complete)*
 3. Inventory — flight-service, hotel-service, public search + admin CRUD *(complete)*
 4. Orchestration — booking-service (Saga), payment-service, loyalty-service *(complete)*
-5. Event-driven — Kafka, notification-service
+5. Event-driven — Kafka, notification-service *(code complete, live end-to-end test pending Docker)*
 6. Resilience & observability — Resilience4j, tracing, metrics, logs
 7. Containerization + real DB — Docker Compose, H2 → Postgres, add Redis
 8. Deployment — Kubernetes + Helm on minikube/kind

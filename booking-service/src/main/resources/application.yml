@@ -20,6 +20,18 @@ spring:
     console:
       enabled: true
       path: /h2-console
+  kafka:
+    bootstrap-servers: localhost:9092
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      properties:
+        "[spring.json.add.type.headers]": false
+        # Default is 60000ms — KafkaTemplate.send() blocks the calling thread
+        # this long to resolve topic metadata if the broker is unreachable.
+        # Bounded low so a Kafka outage degrades a booking request by ~3s of
+        # delay, not a full minute — see BookingEventPublisher's javadoc.
+        "[max.block.ms]": 3000
 
 eureka:
   client:
