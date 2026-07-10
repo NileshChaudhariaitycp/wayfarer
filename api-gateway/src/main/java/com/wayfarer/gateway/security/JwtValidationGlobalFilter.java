@@ -14,6 +14,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.Ordered;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.http.server.reactive.ServerHttpResponse;
@@ -39,12 +40,14 @@ public class JwtValidationGlobalFilter implements GlobalFilter, Ordered {
 
     private final SecretKey signingKey;
     private final List<String> publicPaths;
+    private final List<String> publicGetPaths;
 
     public JwtValidationGlobalFilter(
             @Value("${wayfarer.jwt.secret}") String base64Secret,
             GatewaySecurityProperties securityProperties) {
         this.signingKey = Keys.hmacShaKeyFor(Base64.getDecoder().decode(base64Secret));
         this.publicPaths = securityProperties.publicPaths();
+        this.publicGetPaths = securityProperties.publicGetPaths();
     }
 
     @Override
@@ -55,8 +58,9 @@ public class JwtValidationGlobalFilter implements GlobalFilter, Ordered {
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
         String path = exchange.getRequest().getURI().getPath();
+        HttpMethod method = exchange.getRequest().getMethod();
 
-        if (isPublic(path)) {
+        if (isPublic(path, method)) {
             return chain.filter(exchange);
         }
 
@@ -88,8 +92,11 @@ public class JwtValidationGlobalFilter implements GlobalFilter, Ordered {
         }
     }
 
-    private boolean isPublic(String path) {
-        return publicPaths.stream().anyMatch(pattern -> PATH_MATCHER.match(pattern, path));
+    private boolean isPublic(String path, HttpMethod method) {
+        boolean anyMethodPublic = publicPaths.stream().anyMatch(pattern -> PATH_MATCHER.match(pattern, path));
+        boolean getOnlyPublic = HttpMethod.GET.equals(method)
+                && publicGetPaths.stream().anyMatch(pattern -> PATH_MATCHER.match(pattern, path));
+        return anyMethodPublic || getOnlyPublic;
     }
 
     private Mono<Void> reject(ServerWebExchange exchange, String message) {

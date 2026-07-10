@@ -11,9 +11,10 @@ and [`LEARNING-LOG.md`](LEARNING-LOG.md) for per-phase comprehension checkpoints
 
 ## Status
 
-🚧 Under active build. Phase 0–2 complete: backbone (Eureka, Config Server,
-Gateway) plus identity (auth-service, user-service, JWT + RBAC, gateway
-header forwarding) all built and verified end-to-end.
+🚧 Under active build. Phase 0–3 complete: backbone (Eureka, Config Server,
+Gateway), identity (auth-service, user-service, JWT + RBAC, gateway header
+forwarding), and inventory (flight-service, hotel-service, public search +
+admin CRUD) all built and verified end-to-end.
 
 ## Services
 
@@ -34,15 +35,16 @@ header forwarding) all built and verified end-to-end.
 ## Roadmap
 
 0. Orientation *(complete)*
-1. Foundation — discovery/config/gateway + one trivial service
-2. Core domain & security — user/auth services, full JWT + RBAC
-3. Orchestration — OpenFeign + Saga across booking/payment/loyalty
-4. Event-driven — Kafka, notification-service
-5. Resilience & observability — Resilience4j, tracing, metrics, logs
-6. Containerization + real DB — Docker Compose, H2 → Postgres, add Redis
-7. Deployment — Kubernetes + Helm on minikube/kind
-8. CI/CD — GitHub Actions
-9. Capstone — independent feature ticket, reviewed like a real PR
+1. Foundation — discovery/config/gateway *(complete)*
+2. Identity — auth-service, user-service, full JWT + RBAC, gateway header forwarding *(complete)*
+3. Inventory — flight-service, hotel-service, public search + admin CRUD *(complete)*
+4. Orchestration — booking-service (Saga), payment-service, loyalty-service
+5. Event-driven — Kafka, notification-service
+6. Resilience & observability — Resilience4j, tracing, metrics, logs
+7. Containerization + real DB — Docker Compose, H2 → Postgres, add Redis
+8. Deployment — Kubernetes + Helm on minikube/kind
+9. CI/CD — GitHub Actions
+10. Capstone — independent feature ticket, reviewed like a real PR
 
 ## Role matrix (implemented so far)
 
@@ -52,16 +54,20 @@ header forwarding) all built and verified end-to-end.
 | `POST /auth/login` | ✅ | ✅ | ✅ | ✅ |
 | `GET /users/me` | ❌ | ✅ (own profile) | ✅ (own profile) | ✅ (own profile) |
 | `GET /users/{id}` | ❌ | ❌ | ❌ | ✅ (any profile) |
+| `GET /flights/search`, `GET /flights/{id}` | ✅ | ✅ | ✅ | ✅ |
+| `POST/PUT/DELETE /flights/**` | ❌ | ❌ | ❌ | ✅ |
+| `GET /hotels/search`, `GET /hotels/{id}` | ✅ | ✅ | ✅ | ✅ |
+| `POST/PUT/DELETE /hotels/**` | ❌ | ❌ | ❌ | ✅ |
 
-**Current limitation, called out explicitly:** the "only ADMIN can view
-other profiles" rule is enforced by `user-service`, which trusts
-`X-User-Id`/`X-User-Roles` headers set by `api-gateway` after JWT
-validation (see [ADR 0004](docs/adr/0004-trust-the-gateway.md)). Running
-everything locally via `mvn spring-boot:run`, every service's port is open
-on `localhost` — nothing stops you from calling `user-service` on 8082
-directly and forging those headers to impersonate anyone. That trust
-boundary only becomes real in Phase 6, once docker-compose stops publishing
-anything but the gateway's port to the host.
+**Current limitation, called out explicitly:** the "only ADMIN can write"
+rules are enforced by each service trusting `X-User-Id`/`X-User-Roles`
+headers set by `api-gateway` after JWT validation (see
+[ADR 0004](docs/adr/0004-trust-the-gateway.md)). Running everything locally
+via `mvn spring-boot:run`, every service's port is open on `localhost` —
+nothing stops you from calling a service directly and forging those headers
+to impersonate anyone. That trust boundary only becomes real in Phase 7,
+once docker-compose stops publishing anything but the gateway's port to
+the host.
 
 ## Demo credentials (seeded by each service's DataSeeder)
 

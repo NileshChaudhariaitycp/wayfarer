@@ -25,16 +25,29 @@ spring:
               uri: lb://USER-SERVICE
               predicates:
                 - Path=/users/**
+            - id: flight-service-route
+              uri: lb://FLIGHT-SERVICE
+              predicates:
+                - Path=/flights/**
+            - id: hotel-service-route
+              uri: lb://HOTEL-SERVICE
+              predicates:
+                - Path=/hotels/**
 
 wayfarer:
   security:
-    # Paths the JwtValidationGlobalFilter lets through without a token.
-    # Everything else requires a valid Authorization: Bearer <token> header.
+    # Paths the JwtValidationGlobalFilter lets through without a token,
+    # regardless of HTTP method.
     public-paths:
       - /auth/register
       - /auth/login
       - /actuator/health
       - /config/**
+    # Paths that are public for GET only — POST/PUT/DELETE on the same path
+    # still require a valid token (flight/hotel search vs. admin CRUD).
+    public-get-paths:
+      - /flights/**
+      - /hotels/**
 
 eureka:
   client:
