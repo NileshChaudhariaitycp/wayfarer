@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.wayfarer</groupId>
+        <artifactId>wayfarer-travel-platform</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>booking-service</artifactId>
+    <packaging>jar</packaging>
+    <name>booking-service</name>
+    <description>Orchestrates bookings across flight/hotel/payment/loyalty via Saga; pessimistic locking on inventory. Not yet implemented (Phase 4).</description>
+</project>

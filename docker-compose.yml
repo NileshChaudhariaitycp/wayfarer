@@ -1,0 +1,19 @@
+version: "3.9"
+
+# Placeholder — filled in as each service is built.
+# Target shape (Phase 7 containerizes everything):
+#   - discovery-server, config-server start first (with healthchecks)
+#   - all domain services depend_on config-server being healthy
+#   - api-gateway starts last, depends_on all domain services
+#   - only api-gateway (8080) is published to the host; everything else
+#     talks over the shared bridge network by service name
+#
+# services:
+#   discovery-server:
+#     build: ./discovery-server
+#     ports:
+#       - "8761:8761"
+
+networks:
+  wayfarer-net:
+    driver: bridge
