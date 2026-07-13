@@ -1,0 +1,131 @@
+# Central place every deployment-specific value lives — this is the whole
+# point of converting from k8s/base/*.yaml's 9 nearly-identical
+# Deployment+Service pairs into one template (templates/services.yaml)
+# driven by the `services:` list below. Same DRY instinct as the parent
+# POM's dependencyManagement block back in Phase 0: one place to change a
+# port or add a service, instead of hand-editing N files.
+
+common:
+  # Consumed via envFrom by every entry in `services:` below unless that
+  # entry sets `commonEnv: false` (discovery-server: it never needed these
+  # env vars even in the raw-manifest version — its own application.yml
+  # already points at itself for Eureka self-registration).
+  SPRING_PROFILES_ACTIVE: docker
+  EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka/
+  CONFIG_SERVER_URL: http://config-server:8888
+  MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
+  SPRING_H2_CONSOLE_ENABLED: "false"
+
+postgres:
+  image: postgres:16-alpine
+  user: wayfarer
+  password: wayfarer_dev_password
+  db: wayfarer
+  storage: 1Gi
+
+redis:
+  image: redis:7-alpine
+
+kafka:
+  image: apache/kafka:latest
+
+zipkin:
+  image: openzipkin/zipkin:latest
+
+prometheus:
+  image: prom/prometheus:latest
+
+# Staged-rollout control: only services with `tier <= maxTier` get rendered
+# at all. This exists because a single `helm install` applies every
+# template in one shot — exactly like the all-at-once `kubectl apply -f
+# k8s/base/` that caused a real thundering-herd CPU contention incident on
+# this resource-constrained single-node cluster (see ADR 0010/0011): 9 JVMs
+# starting simultaneously starved each other of CPU badly enough that
+# startupProbes never succeeded. The fix there was deploying in small
+# batches by hand; `maxTier` is the same idea expressed as a values
+# override, so it's repeatable via `helm upgrade --set maxTier=N` instead
+# of remembering which `kubectl apply` command to run in which order.
+# On a machine with more CPU headroom, just install with the default
+# maxTier (5, i.e. everything) — this staging is a workaround for a real
+# constraint on THIS machine, not how a normal Helm install works.
+maxTier: 5
+
+# One entry per service. Fields:
+#   name        - also the container/Service/image name (image is always
+#                 chase_travel_clone-<name>:latest, loaded via
+#                 `kind load docker-image`, imagePullPolicy: Never)
+#   port        - containerPort == Service port == targetPort
+#   tier        - staged-rollout group (see maxTier above); matches the
+#                 exact batches that were verified stable manually:
+#                 1 = backbone, 2 = identity, 3 = inventory,
+#                 4 = orchestration support, 5 = orchestration + gateway
+#   commonEnv   - defaults to true; set false to skip envFrom common config
+#   envOverride - extra/overriding env vars specific to this service
+#   datasource  - if set, wires SPRING_DATASOURCE_* against Postgres using
+#                 this database name
+#   cache       - if true, adds Redis cache env vars (flight/hotel-service)
+#   kafka       - if true, adds SPRING_KAFKA_BOOTSTRAP_SERVERS
+#   nodePort    - if set, the Service is type NodePort on this port instead
+#                 of a plain ClusterIP (api-gateway only)
+services:
+  - name: discovery-server
+    port: 8761
+    tier: 1
+    commonEnv: false
+
+  - name: config-server
+    port: 8888
+    tier: 1
+    envOverride:
+      # See ADR 0010/0011: this service's own application.yml hardcodes
+      # `native` to activate its classpath config-repo backend. Letting
+      # the common SPRING_PROFILES_ACTIVE=docker win here breaks it.
+      SPRING_PROFILES_ACTIVE: native
+
+  - name: auth-service
+    port: 8081
+    tier: 2
+    datasource: authdb
+
+  - name: user-service
+    port: 8082
+    tier: 2
+    datasource: userdb
+
+  - name: flight-service
+    port: 8083
+    tier: 3
+    datasource: flightdb
+    cache: true
+
+  - name: hotel-service
+    port: 8084
+    tier: 3
+    datasource: hoteldb
+    cache: true
+
+  - name: payment-service
+    port: 8086
+    tier: 4
+    datasource: paymentdb
+
+  - name: loyalty-service
+    port: 8088
+    tier: 4
+    datasource: loyaltydb
+
+  - name: booking-service
+    port: 8085
+    tier: 5
+    datasource: bookingdb
+    kafka: true
+
+  - name: notification-service
+    port: 8087
+    tier: 5
+    kafka: true
+
+  - name: api-gateway
+    port: 8080
+    tier: 5
+    nodePort: 30080

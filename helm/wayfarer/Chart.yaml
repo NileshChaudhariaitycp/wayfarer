@@ -1,0 +1,10 @@
+apiVersion: v2
+name: wayfarer
+description: >
+  Wayfarer travel-booking platform — the full microservices stack
+  (11 services + Postgres/Redis/Kafka/Zipkin/Prometheus) as one installable
+  Helm release. Templatized from k8s/base/*.yaml (Phase 8's hand-written
+  raw manifests) once their shape was understood — see ADR 0011.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

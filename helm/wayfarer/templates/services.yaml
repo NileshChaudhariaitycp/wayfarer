@@ -1,0 +1,105 @@
+{{- $maxTier := .Values.maxTier | int }}
+{{- range .Values.services }}
+{{- if le (.tier | int) $maxTier }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .name }}
+  labels:
+    app: {{ .name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .name }}
+    spec:
+      containers:
+        - name: {{ .name }}
+          image: chase_travel_clone-{{ .name }}:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: {{ .port }}
+          {{- if ne .commonEnv false }}
+          envFrom:
+            - configMapRef:
+                name: wayfarer-common-config
+          {{- end }}
+          {{- if or .envOverride .datasource .cache .kafka }}
+          env:
+            {{- range $key, $value := .envOverride }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            {{- if .datasource }}
+            - name: SPRING_DATASOURCE_URL
+              value: "jdbc:postgresql://postgres:5432/{{ .datasource }}"
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: POSTGRES_USER
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: POSTGRES_PASSWORD
+            - name: SPRING_DATASOURCE_DRIVER_CLASS_NAME
+              value: org.postgresql.Driver
+            {{- end }}
+            {{- if .cache }}
+            - name: SPRING_CACHE_TYPE
+              value: redis
+            - name: SPRING_DATA_REDIS_HOST
+              value: redis
+            - name: SPRING_DATA_REDIS_PORT
+              value: "6379"
+            {{- end }}
+            {{- if .kafka }}
+            - name: SPRING_KAFKA_BOOTSTRAP_SERVERS
+              value: kafka:9092
+            {{- end }}
+          {{- end }}
+          # Grace period tuned from live experience on this resource-
+          # constrained single-node cluster (see ADR 0010/0011) — a fixed
+          # initialDelaySeconds on livenessProbe alone killed slow-starting
+          # JVMs before they ever finished booting under CPU contention.
+          startupProbe:
+            httpGet:
+              path: /actuator/health
+              port: {{ .port }}
+            failureThreshold: 60
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: {{ .port }}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: {{ .port }}
+            periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .name }}
+spec:
+  {{- if .nodePort }}
+  type: NodePort
+  {{- end }}
+  selector:
+    app: {{ .name }}
+  ports:
+    - port: {{ .port }}
+      targetPort: {{ .port }}
+      {{- if .nodePort }}
+      nodePort: {{ .nodePort }}
+      {{- end }}
+---
+{{- end }}
+{{- end }}

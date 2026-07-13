@@ -1,0 +1,63 @@
+# Scrape targets are generated FROM the same `.Values.services` list that
+# drives templates/services.yaml, instead of being hand-duplicated in a
+# second place (which is exactly the kind of drift risk DRY templating is
+# meant to close — the raw k8s/base/prometheus.yaml had to be kept in sync
+# with k8s/base's 11 service manifests by hand).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+
+    scrape_configs:
+      - job_name: "wayfarer-services"
+        metrics_path: /actuator/prometheus
+        static_configs:
+          - targets:
+              {{- range .Values.services }}
+              - "{{ .name }}:{{ .port }}"
+              {{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  labels:
+    app: prometheus
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prometheus
+  template:
+    metadata:
+      labels:
+        app: prometheus
+    spec:
+      containers:
+        - name: prometheus
+          image: {{ .Values.prometheus.image }}
+          ports:
+            - containerPort: 9090
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus/prometheus.yml
+              subPath: prometheus.yml
+      volumes:
+        - name: config
+          configMap:
+            name: prometheus-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+spec:
+  selector:
+    app: prometheus
+  ports:
+    - port: 9090
+      targetPort: 9090

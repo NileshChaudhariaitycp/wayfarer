@@ -52,18 +52,21 @@ found and fixed here too, see ADR 0009). Only `api-gateway`,
 now — the "trust the gateway" boundary from Phase 2 is finally enforced by
 the network, not just application code.
 
-Phase 8 (Kubernetes) has its raw-manifest stage complete and fully
-live-verified on a local `kind` cluster: all 16 workloads (11 services +
-Postgres/Redis/Kafka/Zipkin/Prometheus) stable with zero pod restarts, the
-same register → search → book flow verified end-to-end against real
-Postgres, a Kafka event produced and consumed by `notification-service`, a
-full distributed trace across the booking Saga visible in Zipkin, and all
-11 Prometheus scrape targets healthy — see
-[ADR 0010](docs/adr/0010-kubernetes-kind-raw-manifests.md) for the real
-incidents hit along the way (a Docker Desktop crash under a 3-node
-cluster's combined resource load, a config-server profile-override bug,
-and a thundering-herd redeploy mistake). The planned Helm chart conversion
-is still ahead.
+Phase 8 (Kubernetes) is complete and fully live-verified on a local `kind`
+cluster, both as raw manifests and as a Helm chart. All 16 workloads (11
+services + Postgres/Redis/Kafka/Zipkin/Prometheus) stable with zero pod
+restarts, the same register → search → book flow verified end-to-end
+against real Postgres, a Kafka event produced and consumed by
+`notification-service`, a full distributed trace across the booking Saga
+visible in Zipkin, and all 11 Prometheus scrape targets healthy — see
+[ADR 0010](docs/adr/0010-kubernetes-kind-raw-manifests.md) (raw manifests;
+covers a Docker Desktop crash under a 3-node cluster's combined resource
+load, a config-server profile-override bug, and a thundering-herd redeploy
+mistake) and [ADR 0011](docs/adr/0011-helm-chart-conversion.md) (the Helm
+conversion — one parameterized template replaces 9 nearly-identical
+Deployment+Service manifests, plus a `maxTier` staged-rollout mechanism
+that reproduces the same careful staggered deployment as a repeatable
+values override).
 
 ## Services
 
@@ -91,7 +94,7 @@ is still ahead.
 5. Event-driven — Kafka, notification-service *(complete — live-verified in Phase 7)*
 6. Resilience & observability — Resilience4j, tracing, metrics, logs *(complete — Zipkin/Prometheus live-verified in Phase 7)*
 7. Containerization + real DB — Docker Compose, H2 → Postgres, add Redis *(complete)*
-8. Deployment — Kubernetes + Helm on minikube/kind *(raw manifests complete and live-verified on kind; Helm chart conversion in progress)*
+8. Deployment — Kubernetes + Helm on minikube/kind *(complete — both raw manifests and Helm chart live-verified on kind)*
 9. CI/CD — GitHub Actions
 10. Capstone — independent feature ticket, reviewed like a real PR
 
@@ -172,3 +175,32 @@ Or use the seeded [demo credentials](#demo-credentials-seeded-by-each-services-d
 instead of registering. Check `docker compose logs notification-service` for
 the mock email confirmation, and `http://localhost:9411` (Zipkin) for the
 resulting distributed trace.
+
+### Run it on Kubernetes instead
+
+```
+kind create cluster --config k8s/kind-config.yaml
+kind load docker-image $(docker images --format "{{.Repository}}:{{.Tag}}" | grep "^chase_travel_clone-") --name wayfarer
+helm install wayfarer helm/wayfarer
+```
+
+`api-gateway` is reachable at `http://localhost:8080` via `kind`'s
+`extraPortMappings`, same sample flow as above. On a resource-constrained
+machine, install in stages instead of all at once — see `maxTier` in
+`helm/wayfarer/values.yaml` and [ADR 0011](docs/adr/0011-helm-chart-conversion.md):
+
+```
+helm install wayfarer helm/wayfarer --set maxTier=1   # backbone: discovery-server, config-server
+helm upgrade wayfarer helm/wayfarer --set maxTier=2   # + auth-service, user-service
+helm upgrade wayfarer helm/wayfarer --set maxTier=3   # + flight-service, hotel-service
+helm upgrade wayfarer helm/wayfarer --set maxTier=4   # + payment-service, loyalty-service
+helm upgrade wayfarer helm/wayfarer --set maxTier=5   # + booking-service, notification-service, api-gateway
+```
+
+Waiting for each stage's pods to reach `0` restarts (`kubectl get pods`)
+before advancing to the next avoids the CPU contention that a single
+all-at-once install can cause under tight resource limits.
+
+The raw, hand-written manifests this chart was templatized from are kept
+in `k8s/base/*.yaml` as the Phase 8 learning artifact — see
+[ADR 0010](docs/adr/0010-kubernetes-kind-raw-manifests.md).
