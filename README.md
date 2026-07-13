@@ -30,14 +30,27 @@ Run the live test as soon as Docker/Kafka is available.
 
 Phase 6 (Resilience4j + tracing + Prometheus metrics) is complete and fully
 live-verified — circuit breakers confirmed to open under repeated failure,
-fail fast while open, and recover automatically; the same trace ID confirmed
-propagating across booking-service → flight-service → payment-service →
-loyalty-service for a single request (after fixing a real missing-dependency
-bug — see [ADR 0008](docs/adr/0008-observability-tracing-and-metrics.md));
-every service confirmed emitting valid Prometheus-format metrics. Actually
-running Zipkin/Prometheus/Grafana servers themselves stays deferred to
-Phase 7 alongside Docker Compose, for the same Docker-availability reason as
-Phase 5.
+fail fast while open, and recover automatically; every service confirmed
+emitting valid Prometheus-format metrics.
+
+Phase 7 (Docker Compose, Postgres, Redis) is complete and fully
+live-verified: all 11 services + 5 infrastructure containers (Postgres,
+Redis, Kafka, Zipkin, Prometheus) build and run together; a real
+register → login → book flow persists correctly to Postgres; a Kafka
+`BookingEvent` is actually produced and consumed by `notification-service`
+(closing Phase 5's deferred verification); a full 5-service distributed
+trace (api-gateway → booking-service → hotel-service → payment-service →
+loyalty-service) appears correctly in Zipkin for a single booking request
+(closing Phase 6's deferred verification, after fixing a real
+missing-dependency bug — see
+[ADR 0009](docs/adr/0009-containerization-postgres-redis.md)); Prometheus
+reports all 11 scrape targets healthy; and Redis caching on flight/hotel
+search is verified correct on both the cache-miss and cache-hit path (a
+second real bug — Jackson type information being lost on cache reads — was
+found and fixed here too, see ADR 0009). Only `api-gateway`,
+`discovery-server`, `zipkin`, and `prometheus` publish a port to the host
+now — the "trust the gateway" boundary from Phase 2 is finally enforced by
+the network, not just application code.
 
 ## Services
 
@@ -62,9 +75,9 @@ Phase 5.
 2. Identity — auth-service, user-service, full JWT + RBAC, gateway header forwarding *(complete)*
 3. Inventory — flight-service, hotel-service, public search + admin CRUD *(complete)*
 4. Orchestration — booking-service (Saga), payment-service, loyalty-service *(complete)*
-5. Event-driven — Kafka, notification-service *(code complete, live end-to-end test pending Docker)*
-6. Resilience & observability — Resilience4j, tracing, metrics, logs *(complete — Zipkin/Prometheus/Grafana servers themselves pending Docker, alongside Phase 5's Kafka)*
-7. Containerization + real DB — Docker Compose, H2 → Postgres, add Redis
+5. Event-driven — Kafka, notification-service *(complete — live-verified in Phase 7)*
+6. Resilience & observability — Resilience4j, tracing, metrics, logs *(complete — Zipkin/Prometheus live-verified in Phase 7)*
+7. Containerization + real DB — Docker Compose, H2 → Postgres, add Redis *(complete)*
 8. Deployment — Kubernetes + Helm on minikube/kind
 9. CI/CD — GitHub Actions
 10. Capstone — independent feature ticket, reviewed like a real PR
@@ -87,15 +100,15 @@ Phase 5.
 | `GET /bookings` (list all) | ❌ | ❌ | ❌ | ✅ |
 | `GET /loyalty/me` | ❌ | ✅ (own balance) | ✅ (own balance) | ✅ (own balance) |
 
-**Current limitation, called out explicitly:** the "only ADMIN can write"
-rules are enforced by each service trusting `X-User-Id`/`X-User-Roles`
-headers set by `api-gateway` after JWT validation (see
-[ADR 0004](docs/adr/0004-trust-the-gateway.md)). Running everything locally
-via `mvn spring-boot:run`, every service's port is open on `localhost` —
-nothing stops you from calling a service directly and forging those headers
-to impersonate anyone. That trust boundary only becomes real in Phase 7,
-once docker-compose stops publishing anything but the gateway's port to
-the host.
+The "only ADMIN can write" rules are enforced by each service trusting
+`X-User-Id`/`X-User-Roles` headers set by `api-gateway` after JWT validation
+(see [ADR 0004](docs/adr/0004-trust-the-gateway.md)). Running everything
+locally via `mvn spring-boot:run`, every service's port is open on
+`localhost` — nothing stops you from calling a service directly and forging
+those headers to impersonate anyone. **Running via `docker compose up`
+(Phase 7), that trust boundary is real**: only `api-gateway` publishes a
+port to the host, so backend services are unreachable except through the
+gateway's JWT validation.
 
 ## Demo credentials (seeded by each service's DataSeeder)
 
@@ -114,5 +127,35 @@ GitHub Actions.
 
 ## Run it
 
-*(Filled in once services exist — will include `docker compose up --build`,
-demo credentials, gateway base URL, and a sample login → search → book flow.)*
+```
+docker compose up --build -d
+```
+
+Builds and starts all 11 services plus Postgres, Redis, Kafka, Zipkin, and
+Prometheus on a shared `wayfarer-net` bridge network. First boot takes a few
+minutes (11 separate Maven builds); subsequent starts are fast. Only
+`api-gateway` (8080), `discovery-server` (8761), `zipkin` (9411), and
+`prometheus` (9090) are reachable from the host — every backend service is
+internal-only.
+
+Sample flow through the gateway (`http://localhost:8080`):
+
+```
+# Register
+curl -X POST localhost:8080/auth/register -H 'Content-Type: application/json' \
+  -d '{"username":"demo","password":"Password123!","email":"demo@example.com","fullName":"Demo User"}'
+# -> {"token": "...", ...} — save the token
+
+# Search flights (cached in Redis after the first call)
+curl "localhost:8080/flights/search?origin=JFK&destination=LAX"
+
+# Book (runs the full Saga: reserve seats -> authorize payment -> earn loyalty points -> publish Kafka event)
+curl -X POST localhost:8080/bookings/flights -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"flightId":1,"seats":1,"cardToken":"tok_visa_test"}'
+```
+
+Or use the seeded [demo credentials](#demo-credentials-seeded-by-each-services-dataseeder)
+instead of registering. Check `docker compose logs notification-service` for
+the mock email confirmation, and `http://localhost:9411` (Zipkin) for the
+resulting distributed trace.

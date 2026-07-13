@@ -12,9 +12,22 @@ import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+/**
+ * Search results are cached (see application.yml for TTL — short, and only
+ * backed by Redis under the "docker" env; local dev uses Spring's default
+ * in-memory cache). Deliberately NOT evicted by reserveSeats/releaseSeats —
+ * a stale cached seat count can only ever show a seat as available that
+ * turns out to be gone by the time you try to book it, which
+ * booking-service's pessimistic-locked reserveSeats already re-validates
+ * live and correctly rejects (see ADR 0005). That's the same "someone beat
+ * you to it" experience any booking site has; it can never cause
+ * overbooking, since the cache is never in the actual reservation path.
+ */
 @Service
 @RequiredArgsConstructor
 public class FlightService {
@@ -23,6 +36,7 @@ public class FlightService {
 
     private final FlightRepository flightRepository;
 
+    @Cacheable(value = "flightSearch", key = "#origin + '-' + #destination + '-' + #date")
     public List<FlightResponse> search(String origin, String destination, LocalDate date) {
         List<Flight> flights;
         if (date != null) {
@@ -45,6 +59,7 @@ public class FlightService {
     }
 
     @Transactional
+    @CacheEvict(value = "flightSearch", allEntries = true)
     public FlightResponse create(FlightRequest request) {
         Flight flight = new Flight();
         applyRequest(flight, request);
@@ -56,6 +71,7 @@ public class FlightService {
     }
 
     @Transactional
+    @CacheEvict(value = "flightSearch", allEntries = true)
     public FlightResponse update(Long id, FlightRequest request) {
         Flight flight = flightRepository.findById(id).orElseThrow(() -> new FlightNotFoundException(id));
         int seatsBooked = flight.getTotalSeats() - flight.getSeatsAvailable();
@@ -67,6 +83,7 @@ public class FlightService {
     }
 
     @Transactional
+    @CacheEvict(value = "flightSearch", allEntries = true)
     public void delete(Long id) {
         if (!flightRepository.existsById(id)) {
             throw new FlightNotFoundException(id);

@@ -5,7 +5,7 @@ spring:
   application:
     name: flight-service
   config:
-    import: optional:configserver:http://localhost:8888
+    import: "optional:configserver:${CONFIG_SERVER_URL:http://localhost:8888}"
   datasource:
     url: jdbc:h2:mem:flightdb
     driver-class-name: org.h2.Driver
@@ -20,6 +20,13 @@ spring:
     console:
       enabled: true
       path: /h2-console
+  cache:
+    # Local dev default: an unbounded in-memory ConcurrentHashMap, no
+    # external dependency needed. Overridden to "redis" via the
+    # SPRING_CACHE_TYPE env var under docker-compose — see ADR 0009.
+    type: simple
+    redis:
+      time-to-live: 60s
 
 eureka:
   client:

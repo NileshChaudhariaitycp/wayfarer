@@ -2,6 +2,8 @@ package com.wayfarer.flight.exception;
 
 import com.wayfarer.flight.dto.ErrorResponse;
 import jakarta.servlet.http.HttpServletRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
@@ -11,6 +13,8 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     @ExceptionHandler(FlightNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleNotFound(FlightNotFoundException ex, HttpServletRequest req) {
@@ -42,6 +46,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleUnexpected(Exception ex, HttpServletRequest req) {
+        // The client only ever sees "Unexpected error" — but the actual
+        // cause needs to be logged server-side, or a real bug (like the
+        // Redis serialization issue this project hit) is nearly impossible
+        // to diagnose from a generic 500 alone.
+        log.error("Unexpected error handling {} {}", req.getMethod(), req.getRequestURI(), ex);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(ErrorResponse.of(HttpStatus.INTERNAL_SERVER_ERROR.value(), "Unexpected error", req.getRequestURI()));
     }

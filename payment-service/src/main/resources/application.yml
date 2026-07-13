@@ -5,7 +5,7 @@ spring:
   application:
     name: payment-service
   config:
-    import: optional:configserver:http://localhost:8888
+    import: "optional:configserver:${CONFIG_SERVER_URL:http://localhost:8888}"
   datasource:
     url: jdbc:h2:mem:paymentdb
     driver-class-name: org.h2.Driver

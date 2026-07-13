@@ -1,19 +1,346 @@
-version: "3.9"
-
-# Placeholder — filled in as each service is built.
-# Target shape (Phase 7 containerizes everything):
-#   - discovery-server, config-server start first (with healthchecks)
-#   - all domain services depend_on config-server being healthy
-#   - api-gateway starts last, depends_on all domain services
-#   - only api-gateway (8080) is published to the host; everything else
-#     talks over the shared bridge network by service name
+# Full containerized deployment — see ADR 0009 for the reasoning behind
+# every non-obvious decision here (Postgres-per-service via env vars rather
+# than Spring profiles, Kafka KRaft mode, the host-port exposure policy).
 #
-# services:
-#   discovery-server:
-#     build: ./discovery-server
-#     ports:
-#       - "8761:8761"
+# Startup order: postgres/redis/kafka -> discovery-server -> config-server
+# -> every domain service -> api-gateway last. Enforced via depends_on +
+# healthchecks below, not just comments.
+#
+# Host port policy — this is ADR 0004's "trust the gateway" boundary
+# actually being enforced for the first time: ONLY api-gateway (business
+# traffic), discovery-server (Eureka dashboard), zipkin, and prometheus
+# (both observability UIs) publish a port to the host. Every backend
+# service, and postgres/redis/kafka, are reachable only from other
+# containers on wayfarer-net. Before this, "trust the gateway" was a
+# pattern in the code with no actual network enforcement behind it.
 
 networks:
   wayfarer-net:
     driver: bridge
+
+volumes:
+  postgres-data:
+
+services:
+  # ---------------------------------------------------------------------
+  # Infrastructure
+  # ---------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    networks: [wayfarer-net]
+    environment:
+      POSTGRES_USER: wayfarer
+      POSTGRES_PASSWORD: wayfarer_dev_password
+      POSTGRES_DB: wayfarer
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/postgres-init.sql:/docker-entrypoint-initdb.d/postgres-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wayfarer"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    networks: [wayfarer-net]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # KRaft mode (no separate Zookeeper) — modern single-broker Kafka setup.
+  # No healthcheck-gated dependents: Spring Kafka's producer/consumer
+  # already retry connecting in the background rather than failing to
+  # start (see ADR 0006 and the Phase 5 fire-and-forget publish fix) —
+  # gating other services on Kafka being "healthy" would be redundant
+  # belt-and-suspenders for a failure mode we've already made non-fatal.
+  kafka:
+    image: apache/kafka:latest
+    networks: [wayfarer-net]
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+
+  zipkin:
+    image: openzipkin/zipkin:latest
+    networks: [wayfarer-net]
+    ports:
+      - "9411:9411"
+
+  prometheus:
+    image: prom/prometheus:latest
+    networks: [wayfarer-net]
+    volumes:
+      - ./docker/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+
+  # ---------------------------------------------------------------------
+  # Backbone
+  # ---------------------------------------------------------------------
+  discovery-server:
+    build:
+      context: .
+      dockerfile: discovery-server/Dockerfile
+    networks: [wayfarer-net]
+    ports:
+      - "8761:8761"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8761/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  config-server:
+    build:
+      context: .
+      dockerfile: config-server/Dockerfile
+    networks: [wayfarer-net]
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+    environment:
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka/
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8888/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # ---------------------------------------------------------------------
+  # Identity
+  # ---------------------------------------------------------------------
+  auth-service:
+    build:
+      context: .
+      dockerfile: auth-service/Dockerfile
+    networks: [wayfarer-net]
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      config-server:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka/
+      CONFIG_SERVER_URL: http://config-server:8888
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/authdb
+      SPRING_DATASOURCE_USERNAME: wayfarer
+      SPRING_DATASOURCE_PASSWORD: wayfarer_dev_password
+      SPRING_DATASOURCE_DRIVER_CLASS_NAME: org.postgresql.Driver
+      SPRING_H2_CONSOLE_ENABLED: "false"
+      MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
+
+  user-service:
+    build:
+      context: .
+      dockerfile: user-service/Dockerfile
+    networks: [wayfarer-net]
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      config-server:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka/
+      CONFIG_SERVER_URL: http://config-server:8888
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/userdb
+      SPRING_DATASOURCE_USERNAME: wayfarer
+      SPRING_DATASOURCE_PASSWORD: wayfarer_dev_password
+      SPRING_DATASOURCE_DRIVER_CLASS_NAME: org.postgresql.Driver
+      SPRING_H2_CONSOLE_ENABLED: "false"
+      MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
+
+  # ---------------------------------------------------------------------
+  # Inventory
+  # ---------------------------------------------------------------------
+  flight-service:
+    build:
+      context: .
+      dockerfile: flight-service/Dockerfile
+    networks: [wayfarer-net]
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      config-server:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka/
+      CONFIG_SERVER_URL: http://config-server:8888
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/flightdb
+      SPRING_DATASOURCE_USERNAME: wayfarer
+      SPRING_DATASOURCE_PASSWORD: wayfarer_dev_password
+      SPRING_DATASOURCE_DRIVER_CLASS_NAME: org.postgresql.Driver
+      SPRING_H2_CONSOLE_ENABLED: "false"
+      SPRING_CACHE_TYPE: redis
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
+
+  hotel-service:
+    build:
+      context: .
+      dockerfile: hotel-service/Dockerfile
+    networks: [wayfarer-net]
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      config-server:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka/
+      CONFIG_SERVER_URL: http://config-server:8888
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/hoteldb
+      SPRING_DATASOURCE_USERNAME: wayfarer
+      SPRING_DATASOURCE_PASSWORD: wayfarer_dev_password
+      SPRING_DATASOURCE_DRIVER_CLASS_NAME: org.postgresql.Driver
+      SPRING_H2_CONSOLE_ENABLED: "false"
+      SPRING_CACHE_TYPE: redis
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
+
+  # ---------------------------------------------------------------------
+  # Orchestration
+  # ---------------------------------------------------------------------
+  payment-service:
+    build:
+      context: .
+      dockerfile: payment-service/Dockerfile
+    networks: [wayfarer-net]
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      config-server:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka/
+      CONFIG_SERVER_URL: http://config-server:8888
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/paymentdb
+      SPRING_DATASOURCE_USERNAME: wayfarer
+      SPRING_DATASOURCE_PASSWORD: wayfarer_dev_password
+      SPRING_DATASOURCE_DRIVER_CLASS_NAME: org.postgresql.Driver
+      SPRING_H2_CONSOLE_ENABLED: "false"
+      MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
+
+  loyalty-service:
+    build:
+      context: .
+      dockerfile: loyalty-service/Dockerfile
+    networks: [wayfarer-net]
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      config-server:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka/
+      CONFIG_SERVER_URL: http://config-server:8888
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/loyaltydb
+      SPRING_DATASOURCE_USERNAME: wayfarer
+      SPRING_DATASOURCE_PASSWORD: wayfarer_dev_password
+      SPRING_DATASOURCE_DRIVER_CLASS_NAME: org.postgresql.Driver
+      SPRING_H2_CONSOLE_ENABLED: "false"
+      MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
+
+  booking-service:
+    build:
+      context: .
+      dockerfile: booking-service/Dockerfile
+    networks: [wayfarer-net]
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      config-server:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka/
+      CONFIG_SERVER_URL: http://config-server:8888
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/bookingdb
+      SPRING_DATASOURCE_USERNAME: wayfarer
+      SPRING_DATASOURCE_PASSWORD: wayfarer_dev_password
+      SPRING_DATASOURCE_DRIVER_CLASS_NAME: org.postgresql.Driver
+      SPRING_H2_CONSOLE_ENABLED: "false"
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
+
+  # ---------------------------------------------------------------------
+  # Event-driven
+  # ---------------------------------------------------------------------
+  notification-service:
+    build:
+      context: .
+      dockerfile: notification-service/Dockerfile
+    networks: [wayfarer-net]
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      config-server:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka/
+      CONFIG_SERVER_URL: http://config-server:8888
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
+
+  # ---------------------------------------------------------------------
+  # Gateway — the only business-facing port in the whole stack
+  # ---------------------------------------------------------------------
+  api-gateway:
+    build:
+      context: .
+      dockerfile: api-gateway/Dockerfile
+    networks: [wayfarer-net]
+    ports:
+      - "8080:8080"
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      config-server:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka/
+      CONFIG_SERVER_URL: http://config-server:8888
+      MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans

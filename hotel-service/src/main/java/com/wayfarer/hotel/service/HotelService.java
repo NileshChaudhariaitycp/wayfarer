@@ -15,9 +15,12 @@ import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+/** See flight-service's FlightService for the full reasoning on caching search results — same pattern here. */
 @Service
 @RequiredArgsConstructor
 public class HotelService {
@@ -27,6 +30,7 @@ public class HotelService {
     private final HotelRepository hotelRepository;
     private final RoomTypeRepository roomTypeRepository;
 
+    @Cacheable(value = "hotelSearch", key = "#city")
     public List<HotelResponse> search(String city) {
         return hotelRepository.findByCityIgnoreCase(city).stream().map(HotelResponse::from).toList();
     }
@@ -37,6 +41,7 @@ public class HotelService {
     }
 
     @Transactional
+    @CacheEvict(value = "hotelSearch", allEntries = true)
     public HotelResponse create(HotelRequest request) {
         Hotel hotel = new Hotel();
         applyRequest(hotel, request);
@@ -46,6 +51,7 @@ public class HotelService {
     }
 
     @Transactional
+    @CacheEvict(value = "hotelSearch", allEntries = true)
     public HotelResponse update(Long id, HotelRequest request) {
         Hotel hotel = hotelRepository.findById(id).orElseThrow(() -> new HotelNotFoundException(id));
         applyRequest(hotel, request);
@@ -55,6 +61,7 @@ public class HotelService {
     }
 
     @Transactional
+    @CacheEvict(value = "hotelSearch", allEntries = true)
     public void delete(Long id) {
         if (!hotelRepository.existsById(id)) {
             throw new HotelNotFoundException(id);
@@ -64,6 +71,7 @@ public class HotelService {
     }
 
     @Transactional
+    @CacheEvict(value = "hotelSearch", allEntries = true)
     public RoomTypeResponse addRoomType(Long hotelId, RoomTypeRequest request) {
         Hotel hotel = hotelRepository.findById(hotelId).orElseThrow(() -> new HotelNotFoundException(hotelId));
         RoomType roomType = new RoomType();
@@ -78,6 +86,7 @@ public class HotelService {
     }
 
     @Transactional
+    @CacheEvict(value = "hotelSearch", allEntries = true)
     public RoomTypeResponse updateRoomType(Long hotelId, Long roomTypeId, RoomTypeRequest request) {
         RoomType roomType = roomTypeRepository.findById(roomTypeId)
                 .filter(rt -> rt.getHotel().getId().equals(hotelId))
@@ -92,6 +101,7 @@ public class HotelService {
     }
 
     @Transactional
+    @CacheEvict(value = "hotelSearch", allEntries = true)
     public void deleteRoomType(Long hotelId, Long roomTypeId) {
         RoomType roomType = roomTypeRepository.findById(roomTypeId)
                 .filter(rt -> rt.getHotel().getId().equals(hotelId))
