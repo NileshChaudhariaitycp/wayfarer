@@ -1,0 +1,59 @@
+# imagePullPolicy: Never — this image was loaded directly into the kind
+# node's containerd via `kind load docker-image` (see README's k8s section).
+# It doesn't exist in any registry, so the default `IfNotPresent`/`Always`
+# policy would make the kubelet try to pull it and fail with ErrImagePull.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: discovery-server
+  labels:
+    app: discovery-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: discovery-server
+  template:
+    metadata:
+      labels:
+        app: discovery-server
+    spec:
+      containers:
+        - name: discovery-server
+          image: chase_travel_clone-discovery-server:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8761
+          # startupProbe: liveness/readiness don't even start checking until
+          # this succeeds once — up to 30*10s=300s grace period for a slow
+          # JVM boot under load, instead of racing a fixed initialDelaySeconds
+          # against unpredictable startup time (this killed discovery-server
+          # and config-server in a restart loop the first time — see
+          # LEARNING-LOG.md Phase 8).
+          startupProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8761
+            failureThreshold: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8761
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8761
+            periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: discovery-server
+spec:
+  selector:
+    app: discovery-server
+  ports:
+    - port: 8761
+      targetPort: 8761

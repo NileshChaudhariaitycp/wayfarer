@@ -1,0 +1,87 @@
+# ConfigMap holding the same 7-database init script docker-compose mounted
+# as a bind volume — a ConfigMap is K8s's equivalent of "inject this file
+# into the container" when there's no host filesystem to bind-mount from.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init-script
+data:
+  postgres-init.sql: |
+    CREATE DATABASE authdb;
+    CREATE DATABASE userdb;
+    CREATE DATABASE flightdb;
+    CREATE DATABASE hoteldb;
+    CREATE DATABASE bookingdb;
+    CREATE DATABASE paymentdb;
+    CREATE DATABASE loyaltydb;
+---
+# A single-replica Deployment + PersistentVolumeClaim, not a StatefulSet —
+# matches ADR 0009's "one Postgres instance" decision. A real production
+# Postgres-on-K8s setup would more likely use a StatefulSet (stable pod
+# identity/storage across rescheduling) or a managed operator (Zalando's
+# postgres-operator, CloudNativePG) — noted here rather than silently
+# treated as equivalent; this is a learning-project simplification.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-data
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  labels:
+    app: postgres
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate # never run two Postgres pods against the same PVC at once
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          envFrom:
+            - secretRef:
+                name: postgres-credentials
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+            - name: init-script
+              mountPath: /docker-entrypoint-initdb.d
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "wayfarer"]
+            initialDelaySeconds: 10
+            periodSeconds: 5
+      volumes:
+        - name: postgres-data
+          persistentVolumeClaim:
+            claimName: postgres-data
+        - name: init-script
+          configMap:
+            name: postgres-init-script
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+spec:
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432

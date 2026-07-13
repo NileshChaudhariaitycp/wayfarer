@@ -1,0 +1,25 @@
+# kind (Kubernetes-in-Docker) cluster topology for local Phase 8 work.
+#
+# Single control-plane node, not the originally-planned 1+2-worker
+# topology: a 3-node kind cluster (3 full kubelet+containerd+control-plane
+# containers) plus Postgres/Redis/Kafka/Zipkin/Prometheus plus 11 Spring
+# Boot JVMs all starting simultaneously crashed Docker Desktop on this dev
+# machine (see LEARNING-LOG.md Phase 8). Right-sizing the environment to
+# the resource envelope actually available is itself a legitimate senior-
+# engineering call, not a compromise on "real" Kubernetes — a single-node
+# cluster still uses the exact same Deployment/Service/ConfigMap/Secret
+# objects and the exact same Helm chart; only node-distribution/scheduling
+# is not observable, which was never this phase's main teaching goal.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: wayfarer
+nodes:
+  - role: control-plane
+    # Maps host:8080 -> this node's :30080, matching docker-compose's
+    # single published port for api-gateway. kind only supports adding
+    # port mappings at cluster-creation time, not on a running cluster —
+    # api-gateway's Service will be type NodePort with nodePort: 30080.
+    extraPortMappings:
+      - containerPort: 30080
+        hostPort: 8080
+        protocol: TCP

@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loyalty-service
+  labels:
+    app: loyalty-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: loyalty-service
+  template:
+    metadata:
+      labels:
+        app: loyalty-service
+    spec:
+      containers:
+        - name: loyalty-service
+          image: chase_travel_clone-loyalty-service:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8088
+          envFrom:
+            - configMapRef:
+                name: wayfarer-common-config
+          env:
+            - name: SPRING_DATASOURCE_URL
+              value: jdbc:postgresql://postgres:5432/loyaltydb
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: POSTGRES_USER
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: POSTGRES_PASSWORD
+            - name: SPRING_DATASOURCE_DRIVER_CLASS_NAME
+              value: org.postgresql.Driver
+          startupProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8088
+            failureThreshold: 60
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8088
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8088
+            periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: loyalty-service
+spec:
+  selector:
+    app: loyalty-service
+  ports:
+    - port: 8088
+      targetPort: 8088

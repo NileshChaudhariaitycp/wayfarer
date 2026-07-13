@@ -52,6 +52,19 @@ found and fixed here too, see ADR 0009). Only `api-gateway`,
 now — the "trust the gateway" boundary from Phase 2 is finally enforced by
 the network, not just application code.
 
+Phase 8 (Kubernetes) has its raw-manifest stage complete and fully
+live-verified on a local `kind` cluster: all 16 workloads (11 services +
+Postgres/Redis/Kafka/Zipkin/Prometheus) stable with zero pod restarts, the
+same register → search → book flow verified end-to-end against real
+Postgres, a Kafka event produced and consumed by `notification-service`, a
+full distributed trace across the booking Saga visible in Zipkin, and all
+11 Prometheus scrape targets healthy — see
+[ADR 0010](docs/adr/0010-kubernetes-kind-raw-manifests.md) for the real
+incidents hit along the way (a Docker Desktop crash under a 3-node
+cluster's combined resource load, a config-server profile-override bug,
+and a thundering-herd redeploy mistake). The planned Helm chart conversion
+is still ahead.
+
 ## Services
 
 | # | Service | Port | Responsibility |
@@ -78,7 +91,7 @@ the network, not just application code.
 5. Event-driven — Kafka, notification-service *(complete — live-verified in Phase 7)*
 6. Resilience & observability — Resilience4j, tracing, metrics, logs *(complete — Zipkin/Prometheus live-verified in Phase 7)*
 7. Containerization + real DB — Docker Compose, H2 → Postgres, add Redis *(complete)*
-8. Deployment — Kubernetes + Helm on minikube/kind
+8. Deployment — Kubernetes + Helm on minikube/kind *(raw manifests complete and live-verified on kind; Helm chart conversion in progress)*
 9. CI/CD — GitHub Actions
 10. Capstone — independent feature ticket, reviewed like a real PR
 
