@@ -1,0 +1,42 @@
+meta {
+  name: Book Flight
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/bookings/flights
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:json {
+  {
+    "flightId": 1,
+    "seats": 1,
+    "cardToken": "tok_visa_test"
+  }
+}
+
+script:post-response {
+  if (res.body && res.body.id) {
+    bru.setEnvVar("bookingId", res.body.id);
+  }
+}
+
+docs {
+  Runs the full Saga: reserves seats (pessimistic-locked) -> authorizes
+  payment -> earns loyalty points -> publishes a Kafka booking-confirmed
+  event. Requires {{token}} (run Register or Login first).
+
+  The resulting booking id is auto-saved into {{bookingId}}, used by
+  "Get Booking By Id" and "Cancel Booking" below.
+
+  Try changing "cardToken" to "FAIL_CARD" to see a deliberately declined
+  payment -- the response will show status FAILED and the reserved seat
+  gets released automatically (check Search Flights again afterward).
+}

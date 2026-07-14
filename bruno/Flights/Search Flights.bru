@@ -1,0 +1,22 @@
+meta {
+  name: Search Flights
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/flights/search?origin=JFK&destination=LAX
+  body: none
+  auth: none
+}
+
+params:query {
+  origin: JFK
+  destination: LAX
+}
+
+docs {
+  Public endpoint, no token required. Change origin/destination to search
+  other routes (seeded routes include JFK<->LAX among others). Results are
+  cached (Redis in Docker/K8s, in-memory locally) for a short TTL.
+}

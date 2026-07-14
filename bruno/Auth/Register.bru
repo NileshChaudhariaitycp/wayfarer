@@ -1,0 +1,36 @@
+meta {
+  name: Register
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/auth/register
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "username": "yourname",
+    "password": "Password123!",
+    "email": "you@example.com",
+    "fullName": "Your Name"
+  }
+}
+
+script:post-response {
+  if (res.body && res.body.token) {
+    bru.setEnvVar("token", res.body.token);
+  }
+}
+
+docs {
+  Creates a new CUSTOMER account and logs you in immediately.
+  Response's `token` is auto-saved into the `token` environment variable,
+  so every other request in this collection (which uses Bearer {{token}})
+  picks it up automatically -- no copy-pasting needed.
+
+  Change the username/email in the body above before each run, since
+  usernames must be unique.
+}

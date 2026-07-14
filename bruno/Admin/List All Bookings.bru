@@ -1,0 +1,20 @@
+meta {
+  name: List All Bookings
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/bookings
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+docs {
+  ADMIN only -- requires {{adminToken}} (run "Login (Admin)" first).
+  Lists every booking in the system across all customers.
+}

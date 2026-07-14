@@ -1,0 +1,31 @@
+meta {
+  name: Login (Admin)
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/auth/login
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "username": "admin1",
+    "password": "Password123!"
+  }
+}
+
+script:post-response {
+  if (res.body && res.body.token) {
+    bru.setEnvVar("adminToken", res.body.token);
+  }
+}
+
+docs {
+  Logs in as the seeded demo ADMIN account. Saves the token into
+  {{adminToken}} (kept separate from {{token}} so you can hold a customer
+  session and an admin session at the same time). Used by the requests
+  under Admin/.
+}

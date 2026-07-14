@@ -1,0 +1,16 @@
+meta {
+  name: Get Flight By Id
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/flights/1
+  body: none
+  auth: none
+}
+
+docs {
+  Public endpoint. Change the id in the URL to look up a different flight
+  (run Search Flights first to see valid ids).
+}

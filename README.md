@@ -204,3 +204,129 @@ all-at-once install can cause under tight resource limits.
 The raw, hand-written manifests this chart was templatized from are kept
 in `k8s/base/*.yaml` as the Phase 8 learning artifact — see
 [ADR 0010](docs/adr/0010-kubernetes-kind-raw-manifests.md).
+
+### Run it locally instead (no Docker at all)
+
+Every service also runs as a plain Java process against an in-memory H2
+database — no Docker, no Postgres/Redis/Kafka required. Start
+`discovery-server` and `config-server` first (everything else depends on
+them), then the rest in any order:
+
+```
+mvn spring-boot:run -pl discovery-server   # wait for http://localhost:8761 to respond
+mvn spring-boot:run -pl config-server      # wait for http://localhost:8888/actuator/health
+mvn spring-boot:run -pl auth-service
+mvn spring-boot:run -pl user-service
+mvn spring-boot:run -pl flight-service
+mvn spring-boot:run -pl hotel-service
+mvn spring-boot:run -pl payment-service
+mvn spring-boot:run -pl loyalty-service
+mvn spring-boot:run -pl booking-service
+mvn spring-boot:run -pl notification-service
+mvn spring-boot:run -pl api-gateway         # start last — routes to everything above
+```
+
+(Run each in its own terminal, or from your IDE's Spring Boot run
+configurations.) Kafka isn't running in this mode either — bookings still
+complete successfully, `notification-service` just retries its connection
+quietly in the background instead of crashing (see ADR 0006). `api-gateway`
+ends up at `http://localhost:8080`, same as the Docker/Kubernetes paths.
+
+One cosmetic quirk in this mode: `flight-service`/`hotel-service`'s
+`/actuator/health` reports `DOWN`, because Spring Boot auto-registers a
+Redis health check the moment `spring-data-redis` is on the classpath, and
+there's no Redis running locally. The services themselves work completely
+normally — `spring.cache.type` defaults to `simple` (in-memory) locally, so
+Redis was never actually needed for caching here, only Actuator's health
+aggregation looks at it. Eureka doesn't care either way
+(`eureka.client.healthcheck.enabled` is `false`, the default), so gateway
+routing is unaffected.
+
+## Testing the API
+
+Everything goes through `api-gateway` at `http://localhost:8080`, no
+matter which of the three ways above you ran the stack.
+
+### Option A: Bruno (recommended — no manual token copy-pasting)
+
+A ready-to-use [Bruno](https://www.usebruno.com/) collection lives in
+[`bruno/`](bruno/):
+
+1. Open Bruno → **Open Collection** → select the `bruno/` folder.
+2. Select the **local** environment (top-right environment picker) — it
+   points `{{baseUrl}}` at `http://localhost:8080`.
+3. Run **Auth → Register** (or **Login (Customer)** / **Login (Admin)**
+   for the seeded demo accounts). The JWT is captured automatically into
+   the `token` (or `adminToken`) environment variable via a post-response
+   script — every other request already references `{{token}}`, so
+   there's nothing to paste.
+4. Run any request in **Flights**, **Hotels**, **Bookings**, **Loyalty**,
+   or **Admin** — they're grouped by resource, numbered in the order
+   you'd naturally try them (e.g. Book Flight before Get Booking By Id).
+   **Book Flight**/**Book Hotel** also auto-save the resulting booking id
+   into `{{bookingId}}`, used by **Get Booking By Id** and **Cancel
+   Booking**.
+
+Each request has a `docs` tab explaining what it does and any gotchas
+(e.g. `cardToken: "FAIL_CARD"` to test a declined payment).
+
+### Option B: curl / any HTTP client
+
+| Action | Method & path | Auth |
+|---|---|---|
+| Register | `POST /auth/register` | none |
+| Login | `POST /auth/login` | none |
+| Search flights | `GET /flights/search?origin=JFK&destination=LAX` | none |
+| Get flight by id | `GET /flights/{id}` | none |
+| Search hotels | `GET /hotels/search?city=Miami` | none |
+| Book a flight | `POST /bookings/flights` | Bearer token |
+| Book a hotel | `POST /bookings/hotels` | Bearer token |
+| My bookings | `GET /bookings/me` | Bearer token |
+| Get booking by id | `GET /bookings/{id}` | Bearer token |
+| Cancel a booking | `POST /bookings/{id}/cancel` | Bearer token |
+| My loyalty balance | `GET /loyalty/me` | Bearer token |
+| Create a flight | `POST /flights` | Bearer token, **ADMIN** |
+| List every booking | `GET /bookings` | Bearer token, **ADMIN** |
+
+```bash
+# Register (or use the seeded demo credentials below instead)
+curl -X POST localhost:8080/auth/register -H 'Content-Type: application/json' \
+  -d '{"username":"demo","password":"Password123!","email":"demo@example.com","fullName":"Demo User"}'
+# -> {"token": "...", ...}
+TOKEN="<paste the token here>"
+
+curl "localhost:8080/flights/search?origin=JFK&destination=LAX"
+
+curl -X POST localhost:8080/bookings/flights -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"flightId":1,"seats":1,"cardToken":"tok_visa_test"}'
+
+curl -H "Authorization: Bearer $TOKEN" localhost:8080/bookings/me
+curl -H "Authorization: Bearer $TOKEN" localhost:8080/loyalty/me
+```
+
+Full request/response shapes for every endpoint are in each service's DTO
+classes (e.g. `booking-service/src/main/java/com/wayfarer/booking/dto/`) —
+there's no separate OpenAPI doc site yet, but `springdoc-openapi` is on
+every service's classpath, so `http://localhost:808X/swagger-ui.html`
+(replace X with the service's own port) works per-service if you bypass
+the gateway directly in local/no-Docker mode.
+
+### Things worth specifically trying
+
+- **Payment decline**: book with `"cardToken": "FAIL_CARD"` — the response
+  shows `status: "FAILED"`, and the seat that was reserved gets released
+  automatically (search again and see the count go back up).
+- **RBAC boundaries**: try **Create Flight** or **List All Bookings** with
+  a CUSTOMER token instead of `{{adminToken}}` — expect `403`.
+- **Idempotent cancellation**: cancel the same booking twice — the second
+  call is a clean no-op (loyalty points aren't double-reversed, payment
+  isn't double-refunded).
+- **Kafka event**: after booking, check the `notification-service` logs
+  (terminal output if run via `mvn spring-boot:run`, or `docker compose
+  logs notification-service` / `kubectl logs -l app=notification-service`)
+  for a `[MOCK EMAIL] ...` line.
+- **Distributed trace**: if running via Docker Compose or Kubernetes, open
+  `http://localhost:9411` (Zipkin) after a booking and find the trace
+  spanning `api-gateway → booking-service → flight-service/hotel-service →
+  payment-service → loyalty-service`.

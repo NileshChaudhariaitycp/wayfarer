@@ -1,0 +1,21 @@
+meta {
+  name: Get Booking By Id
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/bookings/{{bookingId}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+docs {
+  Uses {{bookingId}}, auto-saved by "Book Flight"/"Book Hotel". Only the
+  booking's own customer, the agent who created it, or an ADMIN can view
+  it -- everyone else gets 403.
+}

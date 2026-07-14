@@ -1,0 +1,20 @@
+meta {
+  name: My Loyalty Balance
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/loyalty/me
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+docs {
+  Shows the logged-in user's current points balance (1 point per dollar
+  spent, credited automatically when a booking is CONFIRMED).
+}

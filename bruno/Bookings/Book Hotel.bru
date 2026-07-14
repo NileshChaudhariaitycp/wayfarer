@@ -1,0 +1,38 @@
+meta {
+  name: Book Hotel
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/bookings/hotels
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:json {
+  {
+    "hotelId": 8,
+    "roomTypeId": 22,
+    "checkInDate": "2026-08-01",
+    "checkOutDate": "2026-08-05",
+    "rooms": 1,
+    "cardToken": "tok_visa_test"
+  }
+}
+
+script:post-response {
+  if (res.body && res.body.id) {
+    bru.setEnvVar("bookingId", res.body.id);
+  }
+}
+
+docs {
+  Same Saga as Book Flight, for a hotel room instead. Run Search Hotels
+  first to find valid hotelId/roomTypeId values if these seeded ones don't
+  match your data. checkInDate/checkOutDate must be in the future.
+}

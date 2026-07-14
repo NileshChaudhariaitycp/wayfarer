@@ -1,0 +1,20 @@
+meta {
+  name: Search Hotels
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/hotels/search?city=Miami
+  body: none
+  auth: none
+}
+
+params:query {
+  city: Miami
+}
+
+docs {
+  Public endpoint, no token required. Change "city" to search other seeded
+  cities (e.g. New York).
+}

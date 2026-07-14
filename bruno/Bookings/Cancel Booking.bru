@@ -1,0 +1,21 @@
+meta {
+  name: Cancel Booking
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{baseUrl}}/bookings/{{bookingId}}/cancel
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+docs {
+  Cancels the booking in {{bookingId}} -- refunds the payment, reverses
+  loyalty points, and releases the seat/room back to inventory, in that
+  order. Only works on PENDING or CONFIRMED bookings.
+}

@@ -1,0 +1,30 @@
+meta {
+  name: Login (Customer)
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/auth/login
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "username": "customer1",
+    "password": "Password123!"
+  }
+}
+
+script:post-response {
+  if (res.body && res.body.token) {
+    bru.setEnvVar("token", res.body.token);
+  }
+}
+
+docs {
+  Logs in as the seeded demo CUSTOMER account. Saves the token into
+  {{token}} automatically -- use this instead of Register if you don't
+  want to create a fresh account every time.
+}

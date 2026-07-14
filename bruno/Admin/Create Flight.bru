@@ -1,0 +1,36 @@
+meta {
+  name: Create Flight
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/flights
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+body:json {
+  {
+    "flightNumber": "WF999",
+    "airline": "Wayfarer Air",
+    "originAirportCode": "SFO",
+    "destinationAirportCode": "ORD",
+    "departureTime": "2026-12-01T09:00:00",
+    "arrivalTime": "2026-12-01T15:00:00",
+    "basePrice": 349.99,
+    "totalSeats": 120
+  }
+}
+
+docs {
+  ADMIN only -- requires {{adminToken}} (run "Login (Admin)" first).
+  CUSTOMER/TRAVEL_AGENT tokens get 403.
+
+  departureTime/arrivalTime must be in the future (they use @Future
+  validation) -- bump the year if this starts failing after 2026.
+}
