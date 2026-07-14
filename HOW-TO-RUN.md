@@ -7,6 +7,47 @@ break. For deeper explanations of *why* things work this way, see
 
 ---
 
+## ✅ Prerequisites
+
+**Always needed, no matter which path below you use:**
+
+| Tool | Why |
+|---|---|
+| **Git** | Clone/pull the repo |
+| **JDK 17** | Compiles and runs every service |
+| **Maven 3.9+** | Builds the project, runs `mvn spring-boot:run` |
+
+A code editor (VS Code or otherwise) is just a convenience — any terminal
+works.
+
+**Only needed for the Docker Compose path:**
+
+| Tool | Why |
+|---|---|
+| **Docker Desktop** | Runs Postgres, Redis, Kafka, Zipkin, Prometheus, and all 11 services as containers |
+
+**Only needed for the Kubernetes path** (not covered step-by-step below —
+see README's "Run it on Kubernetes instead" section):
+
+| Tool | Why |
+|---|---|
+| **Docker Desktop** | `kind` runs cluster nodes *as* Docker containers |
+| **kind** | Creates the local Kubernetes cluster |
+| **kubectl** | Talk to the cluster |
+| **Helm** | Installs the parameterized chart |
+
+**Only needed for testing, not for running:**
+
+| Tool | Why |
+|---|---|
+| **Bruno** (or curl/Postman/Insomnia) | Hitting the API endpoints — any HTTP client works, Bruno's just what the ready-made collection in `bruno/` targets |
+
+**The practical takeaway:** the plain-Maven path below only needs Git +
+JDK 17 + Maven — nothing else. It's the most dependency-light and most
+reliable option if Docker Desktop is ever acting up.
+
+---
+
 ## ⭐ Fastest path: Docker Compose
 
 **Use this if Docker Desktop is running.**
