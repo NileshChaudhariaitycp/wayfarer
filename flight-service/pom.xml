@@ -96,6 +96,21 @@
             <artifactId>spring-security-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- Real Postgres via Testcontainers: the pessimistic-lock
+             concurrency test needs actual row-level locking behavior, which
+             an H2 in-memory DB (or a mocked repository) cannot faithfully
+             reproduce. Versions come from spring-boot-starter-parent's own
+             dependency management — no separate BOM import needed. -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
