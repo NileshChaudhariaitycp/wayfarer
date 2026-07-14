@@ -5,6 +5,10 @@ booking platform (flights + hotels). Built to learn how a real production
 microservices system is designed, built, deployed, and operated — not a copy of
 any proprietary code, branding, or UI.
 
+> **Just want to run it?** → **[HOW-TO-RUN.md](HOW-TO-RUN.md)** — the
+> quick-reference for starting the project and testing it with Bruno,
+> no background reading required.
+
 See [`docs/adr/`](docs/adr/) for the reasoning behind major decisions,
 [`GLOSSARY.md`](GLOSSARY.md) for plain-English term definitions as they come up,
 and [`LEARNING-LOG.md`](LEARNING-LOG.md) for per-phase comprehension checkpoints.
